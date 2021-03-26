@@ -122,6 +122,7 @@ public class Itch {
                     System.out.println("An error occurred while accepting a connection: " + x.getMessage());
                 }
             }
+            System.out.println("SocketAcceptorThread has finished.");
         }
     }
 
@@ -139,21 +140,28 @@ public class Itch {
         Runtime.getRuntime().addShutdownHook(new Thread() {
             @Override
             public void run(){
-                // TODO - move this into an itch.close method
-                System.out.println("Itch is shutting down.");
-                socketAcceptor.interrupt();
-                try {
-                    socketAcceptor.join(1000);
-                } catch(InterruptedException ix){
-                    System.out.println("Warning: the shutdown hook was interruped while waiting for the SocketAcceptorThread to stop");
-                }
-                System.out.println("Shutdown is complete.");
+                close();
             }
         });
         // start accepting connections
         this.socketAcceptor = new SocketAcceptorThread();
         socketAcceptor.start();
     }
+
+    private void close(){
+        System.out.println("Itch is shutting down.");
+
+        // shut down the socket acceptor
+        socketAcceptor.interrupt();
+        try {
+            socketAcceptor.join(1000);
+        } catch(InterruptedException ix){
+            System.out.println("Warning: the shutdown hook was interruped while waiting for the SocketAcceptorThread to stop");
+        }
+
+        System.out.println("Shutdown is complete.");
+    }
+
 
     private  ServerSocketChannel openServerSocket(){
         ServerSocketChannel serverSocketChannel = null;
