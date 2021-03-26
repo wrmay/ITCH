@@ -6,9 +6,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.UnknownHostException;
+import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.util.LinkedList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -34,31 +34,12 @@ public class Itch {
 
         InetSocketAddress []addresses = parseMemberNames(config.getMembers());
 
-        ServerSocketChannel serverSocketChannel = openServerSocket(addresses);
-        if (serverSocketChannel == null){
-            System.out.println("System will exit.");
-            System.exit(1);
-        }
-
-        LinkedList<SocketChannel> inboundSockets = new LinkedList<>();
-
         try {
-            while(true){
-                // TODO - need to make this interruptible
-                try {
-                    SocketChannel socket = serverSocketChannel.accept();
-                    System.out.println("Received new connection from " + socket.getRemoteAddress());
-                    socket.close();
-                } catch(IOException x){
-                    System.out.println("An error occurred while accepting a connection: " + x.getMessage());
-                }
-            }
-        } finally {
-            try {
-                serverSocketChannel.close();
-            } catch(IOException iox){
-                // nothing to do about this
-            }
+            Itch itch = new Itch(addresses);
+        } catch(RuntimeException x){
+            System.out.println(x.getMessage());
+            System.out.println("System will exit"); // make this a utility function
+            System.exit(1);
         }
     }
 
@@ -114,7 +95,67 @@ public class Itch {
         return addresses;
     }
 
-    private static ServerSocketChannel openServerSocket(InetSocketAddress [] addresses){
+
+    /// instance state 
+    private SocketAcceptorThread socketAcceptor;
+    private ServerSocketChannel serverSocketChannel;
+    //private AtomicBoolean running;
+    private InetSocketAddress []addresses;
+
+    private class SocketAcceptorThread extends Thread {
+        public SocketAcceptorThread(){
+            super();
+            this.setDaemon(false);
+        }
+
+        @Override
+        public void run() {
+            while(! isInterrupted()){
+                try {
+                    SocketChannel socket = serverSocketChannel.accept();
+                    System.out.println("Received new connection from " + socket.getRemoteAddress());
+                    socket.close();
+                } catch(ClosedByInterruptException cbix){
+                    // this is expected during shutdown
+                    break;
+                } catch(IOException x){
+                    System.out.println("An error occurred while accepting a connection: " + x.getMessage());
+                }
+            }
+        }
+    }
+
+    public Itch(InetSocketAddress []addresses){
+        //this.running = new AtomicBoolean(true);
+        this.addresses = addresses;
+
+        // set up the serverSocketChannel
+        this.serverSocketChannel = openServerSocket();
+        if (this.serverSocketChannel == null) {
+            throw new RuntimeException("An erorr occurred while opening the ServerSocketChannel");
+        }
+
+        // register shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            @Override
+            public void run(){
+                // TODO - move this into an itch.close method
+                System.out.println("Itch is shutting down.");
+                socketAcceptor.interrupt();
+                try {
+                    socketAcceptor.join(1000);
+                } catch(InterruptedException ix){
+                    System.out.println("Warning: the shutdown hook was interruped while waiting for the SocketAcceptorThread to stop");
+                }
+                System.out.println("Shutdown is complete.");
+            }
+        });
+        // start accepting connections
+        this.socketAcceptor = new SocketAcceptorThread();
+        socketAcceptor.start();
+    }
+
+    private  ServerSocketChannel openServerSocket(){
         ServerSocketChannel serverSocketChannel = null;
         try {
             serverSocketChannel = ServerSocketChannel.open();
