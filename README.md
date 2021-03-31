@@ -25,8 +25,6 @@ This provides an independent record of connectivity between nodes during a perio
 - timestamp when received (added by the recipient upon receipt)
 - sequence number (sender plus recipient plus sequence # uniquely identifies a heartbeat message) 
 
-It needs a method to write to a Buffer and another to read from a Buffer
-
 # Configuration
 Place a file called itch.yaml in the working directory. The content should be 
 similar to the example given below.  Note that the members must be specified with an IP address.  This 
