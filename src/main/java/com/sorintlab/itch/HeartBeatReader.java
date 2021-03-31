@@ -15,6 +15,7 @@ public class HeartBeatReader implements Runnable {
     private int expectedBytes;
     private String localAddress;
     private String remoteAddress;
+    private long lastHeartbeat;
 
     public HeartBeatReader(SocketChannel channel) throws IOException {
         this.channel = channel;
@@ -33,6 +34,7 @@ public class HeartBeatReader implements Runnable {
                 HeartBeat hb = this.getHeartBeat();
                 hb.setReceiver(localAddress);
                 hb.setReceiveTime(System.currentTimeMillis());
+                lastHeartbeat = hb.getReceiveTime();
                 System.out.println(hb.toString());
             }
         } catch(IOException iox){
@@ -124,5 +126,13 @@ public class HeartBeatReader implements Runnable {
         } else {
             return null;
         }
+    }
+
+    public long getLastHeartbeat(){
+        return this.lastHeartbeat;
+    }
+
+    public String getRemoteAddress(){
+        return this.remoteAddress;
     }
 }

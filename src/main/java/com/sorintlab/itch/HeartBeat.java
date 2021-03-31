@@ -116,8 +116,9 @@ public class HeartBeat {
 
    @Override
    public String toString(){
-       DateFormat fmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS z");
+       DateFormat fmt = new SimpleDateFormat(Itch.TIMESTAMP_FORMAT);
        return "HeartBeat [ SENDER=" + sender + " at " + fmt.format(new Date(sendTime)) + " RECEIVER=" + receiver + " at " + fmt.format(new Date(receiveTime)) + " SEQ=" + sequence + " ]";
    }
-   
+
+
 }

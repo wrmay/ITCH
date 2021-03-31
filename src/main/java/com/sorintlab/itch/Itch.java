@@ -9,6 +9,8 @@ import java.net.UnknownHostException;
 import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.LinkedList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -23,6 +25,8 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 
 public class Itch {
+    public static String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS z";
+
     public static void main(String []args){
         File configFile = new File("itch.yaml");
         if (!configFile.exists()){
@@ -147,6 +151,20 @@ public class Itch {
         // start accepting connections
         this.socketAcceptor = new SocketAcceptorThread();
         socketAcceptor.start();
+
+        // start the late heartbeat monitor thread
+        executor.scheduleAtFixedRate(new Runnable(){
+            @Override
+            public void run() {
+                DateFormat fmt = new SimpleDateFormat(TIMESTAMP_FORMAT);
+                long now = System.currentTimeMillis();
+                for(HeartBeatReader reader: heartbeatReaders){
+                    if (  now - reader.getLastHeartbeat() > 10000){
+                        System.out.println("WARNING: there have been no heart beats from " + reader.getRemoteAddress() + " since " + fmt.format(reader.getLastHeartbeat()) );
+                    }
+                }
+            }
+        }, 30, 10, TimeUnit.SECONDS);
     }
 
     private SocketChannel waitForConnection(InetSocketAddress address) throws IOException {
