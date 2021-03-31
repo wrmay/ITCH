@@ -9,6 +9,10 @@ import java.net.UnknownHostException;
 import java.nio.channels.ClosedByInterruptException;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.util.LinkedList;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,7 +41,7 @@ public class Itch {
         try {
             Itch itch = new Itch(addresses);
         } catch(RuntimeException x){
-            System.out.println(x.getMessage());
+            x.printStackTrace(System.out);
             System.out.println("System will exit"); // make this a utility function
             System.exit(1);
         }
@@ -99,41 +103,37 @@ public class Itch {
     /// instance state 
     private SocketAcceptorThread socketAcceptor;
     private ServerSocketChannel serverSocketChannel;
-    //private AtomicBoolean running;
     private InetSocketAddress []addresses;
-
-    private class SocketAcceptorThread extends Thread {
-        public SocketAcceptorThread(){
-            super();
-            this.setDaemon(false);
-        }
-
-        @Override
-        public void run() {
-            while(! isInterrupted()){
-                try {
-                    SocketChannel socket = serverSocketChannel.accept();
-                    System.out.println("Received new connection from " + socket.getRemoteAddress());
-                    socket.close();
-                } catch(ClosedByInterruptException cbix){
-                    // this is expected during shutdown
-                    break;
-                } catch(IOException x){
-                    System.out.println("An error occurred while accepting a connection: " + x.getMessage());
-                }
-            }
-            System.out.println("SocketAcceptorThread has finished.");
-        }
-    }
+    private int localAddressNum;
+    private LinkedList<HeartBeatReader> heartbeatReaders;
+    private LinkedList<HeartBeatWriter> heartbeatWriters;
+    private ScheduledExecutorService executor;
 
     public Itch(InetSocketAddress []addresses){
-        //this.running = new AtomicBoolean(true);
         this.addresses = addresses;
+        this.heartbeatReaders = new LinkedList<>();
+        this.heartbeatWriters = new LinkedList<>();
+        this.executor = Executors.newScheduledThreadPool(4);
 
-        // set up the serverSocketChannel
+        // set up the serverSocketChannel - this has to happen before attempting top open outbound sockets
         this.serverSocketChannel = openServerSocket();
         if (this.serverSocketChannel == null) {
             throw new RuntimeException("An erorr occurred while opening the ServerSocketChannel");
+        }
+
+        // set up the outbound hearbeat writers
+        for(int i=0;i < addresses.length; ++i){
+            if (i == localAddressNum) continue;
+
+            try {
+                SocketChannel channel = waitForConnection(addresses[i]);
+                channel.configureBlocking(false);
+                HeartBeatWriter hbWriter = new HeartBeatWriter(channel);
+                heartbeatWriters.add(hbWriter);
+                executor.scheduleAtFixedRate(hbWriter, 1, 1, TimeUnit.SECONDS);
+            } catch(IOException x){
+                throw new RuntimeException("An error occurred while opening outbound connections: " + x.getMessage());
+            }
         }
 
         // register shutdown hook
@@ -143,9 +143,39 @@ public class Itch {
                 close();
             }
         });
+
         // start accepting connections
         this.socketAcceptor = new SocketAcceptorThread();
         socketAcceptor.start();
+    }
+
+    private SocketChannel waitForConnection(InetSocketAddress address) throws IOException {
+        int attemptLimit = 120;
+        SocketChannel channel = SocketChannel.open();
+        for(int attempt =0; attempt < attemptLimit; ++attempt){
+            try {
+                channel.connect(address);
+                break; // BREAK
+            } catch(IOException x){
+                x.printStackTrace(System.out);
+                System.out.println("An error occurred during attempt " + (attempt + 1) + "/" +  attemptLimit + " to connect to " + address);
+                if (attempt + 1 < attemptLimit){
+                    System.out.println("Will try again in 1s");
+                    try {
+                        Thread.sleep(1000);
+                    } catch(InterruptedException ix){
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Interrupted during wait between connection attempts");
+                    }
+
+                    // if the other side refuses the connection this channel will be closed and further
+                    // connect attempts won't work
+                    if (!channel.isOpen()) channel = SocketChannel.open();
+                }
+            }
+        }
+
+        return channel;
     }
 
     private void close(){
@@ -159,9 +189,22 @@ public class Itch {
             System.out.println("Warning: the shutdown hook was interruped while waiting for the SocketAcceptorThread to stop");
         }
 
+        // shut down executor threads 
+        executor.shutdown();
+
+        // shut down heartbeat readers
+        System.out.println("Closing inbound connections");
+        for(HeartBeatReader hbReader: heartbeatReaders){
+            hbReader.close();
+        }
+
+        System.out.println("Closing outbound connections");
+        for(HeartBeatWriter hbWriter: heartbeatWriters){
+            hbWriter.close();
+        }
+
         System.out.println("Shutdown is complete.");
     }
-
 
     private  ServerSocketChannel openServerSocket(){
         ServerSocketChannel serverSocketChannel = null;
@@ -173,7 +216,8 @@ public class Itch {
         }
 
         SocketAddress localAddress = null;
-        for(InetSocketAddress address: addresses){
+        for(int i=0; i < addresses.length; ++i){
+            InetSocketAddress address = addresses[i];
             if (address == null){
                 System.out.println("At least one member address could not be read.");
                 return null; //RETURN
@@ -184,6 +228,8 @@ public class Itch {
                 if (localAddress == null){
                     serverSocketChannel.bind(address);
                     localAddress = serverSocketChannel.getLocalAddress();
+                    localAddressNum = i;
+                    break; // BREAK
                 }
             } catch(IOException iox){
                 // this is expected
@@ -197,5 +243,33 @@ public class Itch {
 
         System.out.println("listening on " + localAddress); 
         return serverSocketChannel;
+    }
+   
+    private class SocketAcceptorThread extends Thread {
+        public SocketAcceptorThread(){
+            super();
+            this.setDaemon(false);
+        }
+
+        @Override
+        public void run() {
+            while(! isInterrupted()){
+                try {
+                    SocketChannel socket = serverSocketChannel.accept();
+                    socket.configureBlocking(false);
+
+                    System.out.println("Received new connection from " + socket.getRemoteAddress());
+                    HeartBeatReader hbReader = new HeartBeatReader(socket);
+                    heartbeatReaders.add(hbReader);
+                    executor.scheduleAtFixedRate(hbReader, 1, 1, TimeUnit.SECONDS);
+                } catch(ClosedByInterruptException cbix){
+                    // this is expected during shutdown
+                    break;
+                } catch(IOException x){
+                    System.out.println("An error occurred while accepting a connection: " + x.getMessage());
+                }
+            }
+            System.out.println("SocketAcceptorThread has finished.");
+        }
     }
 }

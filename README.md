@@ -13,7 +13,7 @@ to a socket channel in async mode.  Each period, if the message is successfully
 written to the socket a message will be recorded in the logs. If the socket is 
 not ready to send, a message will be recorded in the logs.  
 
-For receiving heartbeats, a ServerSocketChannels will be created and 
+For receiving heartbeats, a ServerSocketChannel will be created and 
 a thread will be periodically scheduled to receive the heartbeats from the 
 channels and write a message. 
 
@@ -39,3 +39,6 @@ members:
     - member-2
 
 ```
+# Enhancements
+
+1. Use a logging framework.
