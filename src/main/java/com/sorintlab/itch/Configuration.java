@@ -4,6 +4,7 @@ import java.util.Arrays;
 
 public class Configuration {
     private String []members;
+    private int maxLogFileMegabytes;
 
     public String[] getMembers() {
         return members;
@@ -13,10 +14,19 @@ public class Configuration {
         this.members = members;
     }
 
-    @Override
-    public String toString() {
-        return "Configuration [members=" + Arrays.toString(members) + "]";
+    public int getMaxLogFileMegabytes() {
+        return maxLogFileMegabytes;
     }
 
-    
+    public void setMaxLogFileMegabytes(int maxLogFileMegabytes) {
+        this.maxLogFileMegabytes = maxLogFileMegabytes;
+    }
+
+    @Override
+    public String toString() {
+        return "Configuration{" +
+                "members=" + Arrays.toString(members) +
+                ", maxLogFileMegabytes=" + maxLogFileMegabytes +
+                '}';
+    }
 }

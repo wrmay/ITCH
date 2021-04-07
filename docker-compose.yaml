@@ -1,5 +1,6 @@
 services:
   node1:
+    hostname: node1
     image: adoptopenjdk
     volumes:
     - ".:/opt/project"
@@ -10,6 +11,7 @@ services:
     command: java -cp /opt/project/target/itch-1.0-SNAPSHOT.jar com.sorintlab.itch.Itch
 
   node2:
+    hostname: node2
     image: adoptopenjdk
     volumes:
       - ".:/opt/project"
@@ -20,6 +22,7 @@ services:
     command: java -cp /opt/project/target/itch-1.0-SNAPSHOT.jar com.sorintlab.itch.Itch
 
   node3:
+    hostname: node3
     image: adoptopenjdk
     volumes:
       - ".:/opt/project"

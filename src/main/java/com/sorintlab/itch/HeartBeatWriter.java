@@ -3,6 +3,7 @@ package com.sorintlab.itch;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
+import java.util.logging.Level;
 
 public class HeartBeatWriter implements Runnable {
 
@@ -39,6 +40,12 @@ public class HeartBeatWriter implements Runnable {
                 hb.writeTo(byteBuffer);
                 byteBuffer.flip();
                 state = State.SENDING;
+
+                // only setting the receiver for logging purposes
+                // the heartbeat is written to the send buffer without a receiver because it is
+                // filled in by the receiver upon receipt
+                hb.setReceiver(remoteAddress);
+                Itch.log.info("SENT " + hb);
             }
 
             channel.write(byteBuffer);
@@ -46,21 +53,21 @@ public class HeartBeatWriter implements Runnable {
                 byteBuffer.clear();
                 state = State.READY;
             } else {
-                System.out.println("Warning: could not send all heartbeat bytes to " + remoteAddress + " no more heartbeats will be sent until this heartbeat can be written to the socket");
+                Itch.log.warning("Could not send all heartbeat bytes to " + remoteAddress + " no more heartbeats will be sent until this heartbeat can be written to the socket");
             }
 
         } catch(IOException x){
-            System.out.println("An error occurred while attempting to send a heartbeat to " + remoteAddress + ": " + x.getMessage());
+            Itch.log.log(Level.WARNING, "An error occurred while attempting to send a heartbeat to " + remoteAddress ,x);
             state = State.READY;
         }
     }
 
     public void close(){
         try { 
-            System.out.println("Closing socket to " + remoteAddress);
+            Itch.log.info("Closing socket to " + remoteAddress);
             channel.close();
         } catch(IOException x){
-            System.out.println("Warning: an error occurred while closing a socket. " + x.getMessage());
+            Itch.log.warning("Warning: an error occurred while closing a socket. " + x.getMessage());
         }
     }
 

@@ -3,6 +3,7 @@ package com.sorintlab.itch;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
+import java.util.logging.Level;
 
 public class HeartBeatReader implements Runnable {
 
@@ -35,19 +36,19 @@ public class HeartBeatReader implements Runnable {
                 hb.setReceiver(localAddress);
                 hb.setReceiveTime(System.currentTimeMillis());
                 lastHeartbeat = hb.getReceiveTime();
-                System.out.println(hb.toString());
+                Itch.log.info("RECEIVED " + hb.toString());
             }
         } catch(IOException iox){
-            System.out.println("An error occurred while reading a HearBeat from " + remoteAddress + ": "  + iox.getMessage());
+            Itch.log.log(Level.WARNING, "An error occurred while reading a HeartBeat from " + remoteAddress, iox);
         }
     }
 
     public void close(){
-        try { 
-            System.out.println("Closing socket from " + channel.getRemoteAddress());
+        try {
+            Itch.log.info("Closing socket from " + channel.getRemoteAddress());
             channel.close();
         } catch(IOException x){
-            System.out.println("Warning: an error occurred while closing a socket. " + x.getMessage());
+            Itch.log.warning("Warning: an error occurred while closing a socket. " + x.getMessage());
         }
     }
 
@@ -81,7 +82,7 @@ public class HeartBeatReader implements Runnable {
                         char H = byteBuffer.getChar();
                         char B = byteBuffer.getChar();
                         if (H != 'H' || B != 'B'){
-                            System.out.println("Warning: Unexpected data found in place of HB marker");
+                            Itch.log.warning("Unexpected data found in place of HB marker");
                         } else {
                             state = State.AWAITING_SIZE;
                         }
@@ -90,7 +91,7 @@ public class HeartBeatReader implements Runnable {
 
                         expectedBytes = byteBuffer.getInt();
                         if (expectedBytes <= 0){
-                            System.out.println("Warning: negative value found in heartbeat size header. Ignoring this heartbeat");
+                            Itch.log.warning("negative value found in heartbeat size header. Ignoring this heartbeat");
                             state = State.AWAITING_HB;
                         } else {
                             state = State.AWAITING_DATA;
@@ -100,7 +101,7 @@ public class HeartBeatReader implements Runnable {
                     
                         heartbeat = HeartBeat.readFrom(byteBuffer);
                         if (heartbeat == null){
-                            System.out.println("An error occurred while reading a HeartBeat from the socket.  Ignoring this heartbeat.");
+                            Itch.log.warning("An error occurred while reading a HeartBeat from the socket.  Ignoring this heartbeat.");
                             state = State.AWAITING_HB;
                         } else {
                             state = State.HEARTBEAT_READY;

@@ -15,6 +15,7 @@ import java.util.LinkedList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -26,6 +27,8 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 public class Itch {
     public static String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS z";
+
+    public static Logger log;
 
     public static void main(String []args){
         File configFile = new File("itch.yaml");
@@ -39,23 +42,82 @@ public class Itch {
             System.out.println("System will exit.");
             System.exit(1);
         }
+        String hostname = null;
+        try {
+            hostname = InetAddress.getLocalHost().getHostName();
+        } catch (UnknownHostException uhx){
+            System.out.println("WARNING: Could not determine host name.");
+        }
+
+        try {
+            log = setupLogging(config, hostname);
+        } catch (IOException e) {
+            System.out.println("Could not set up logging due to: " + e.getMessage());
+            System.exit(1);
+        }
 
         InetSocketAddress []addresses = parseMemberNames(config.getMembers());
+        int nullAddresses = 0;
+        for(InetSocketAddress address: addresses){
+            if (address == null) nullAddresses += 1;
+        }
+        if (nullAddresses > 0){
+            Itch.log.severe("The system is exiting because " + nullAddresses + " of the provided addresses could not be parsed");
+            System.exit(1);
+        }
 
         try {
             Itch itch = new Itch(addresses);
         } catch(RuntimeException x){
-            x.printStackTrace(System.out);
-            System.out.println("System will exit"); // make this a utility function
+            Itch.log.log(Level.SEVERE, "An unexpected exception occurred", x);
             System.exit(1);
         }
+
+        // note: the system will not exit because the socket acceptor thread is not a daemon
+        //       I suppose it might make sense to just put that loop here
+    }
+
+    private static Logger setupLogging(Configuration config, String hostname) throws IOException {
+        String logFileName = hostname == null ? "itch.log" : "itch_" + hostname + ".log";
+        Logger result = Logger.getLogger("itch");
+        FileHandler fileHandler = new FileHandler(logFileName, config.getMaxLogFileMegabytes() * 1024 * 1024, 1);
+
+        Formatter formatter = new Formatter(){
+            // TODO - research whether this instance can be called from multiple threads and
+            // whether SimpleDateFormat is thread safe. If safe, make the SimpleDateFormat
+            // object a member of this formatter
+
+            @Override
+            public String format(LogRecord record) {
+                if (record.getThrown() == null) {
+                    return new SimpleDateFormat(TIMESTAMP_FORMAT).format(record.getMillis()) + " "
+                            + record.getLevel().toString() + " : " + record.getMessage() + "\n";
+                } else {
+                    return new SimpleDateFormat(TIMESTAMP_FORMAT).format(record.getMillis()) + " "
+                            + record.getLevel().toString() + " : " + record.getMessage() + " : " + record.getThrown() + "\n";
+
+                }
+            }
+        };
+
+        result.setLevel(Level.ALL);
+        result.setUseParentHandlers(false);
+
+        fileHandler.setFormatter(formatter);
+        result.addHandler(fileHandler);
+
+        ConsoleHandler consoleHandler = new ConsoleHandler();
+        consoleHandler.setLevel(Level.WARNING);
+        consoleHandler.setFormatter(formatter);
+        result.addHandler(consoleHandler);
+
+        System.out.println("logging  to " + new File(logFileName).getAbsolutePath());
+        return result;
     }
 
     /**
      * Parses the YAML configuration file and returns a Configuration object.
      * This method will print a message and return null if the configuration cannot be parsed.
-     * @param configFile
-     * @return
      */
     private static Configuration readConfig(File configFile){
         Configuration result = null;
@@ -74,13 +136,12 @@ public class Itch {
 
     /**
      * Converts the member names in nnn.nnn.nnn.nnn:pppp format into InetSocketAddress instances.
-     * 
-     * @param memberNames
+     *
      * @return an array of InetSocketAddress the same size as the input. If any item in the input
      * cannot be parsed, a message will be logged and the corresponding item in the output will be null;
      */
     private static InetSocketAddress []parseMemberNames(String []memberNames){
-        Pattern ipv4pattern = Pattern.compile("(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})\\:(\\d{2,5})");
+        Pattern ipv4pattern = Pattern.compile("(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}):(\\d{2,5})");
         InetSocketAddress []addresses = new InetSocketAddress[memberNames.length];
         int i = 0;
         for(String address: memberNames){
@@ -160,7 +221,7 @@ public class Itch {
                 long now = System.currentTimeMillis();
                 for(HeartBeatReader reader: heartbeatReaders){
                     if (  now - reader.getLastHeartbeat() > 10000){
-                        System.out.println("WARNING: there have been no heart beats from " + reader.getRemoteAddress() + " since " + fmt.format(reader.getLastHeartbeat()) );
+                        Itch.log.warning("there have been no heart beats from " + reader.getRemoteAddress() + " since " + fmt.format(reader.getLastHeartbeat()));
                     }
                 }
             }
@@ -175,10 +236,9 @@ public class Itch {
                 channel.connect(address);
                 break; // BREAK
             } catch(IOException x){
-                x.printStackTrace(System.out);
-                System.out.println("An error occurred during attempt " + (attempt + 1) + "/" +  attemptLimit + " to connect to " + address);
+                Itch.log.log(Level.INFO,"An error occurred during attempt " + (attempt + 1) + "/" +  attemptLimit + " to connect to " + address, x);
                 if (attempt + 1 < attemptLimit){
-                    System.out.println("Will try again in 1s");
+                    Itch.log.info("Will try again in 1s");
                     try {
                         Thread.sleep(1000);
                     } catch(InterruptedException ix){
@@ -193,53 +253,51 @@ public class Itch {
             }
         }
 
+        Itch.log.info("Established connection to " + address);
         return channel;
     }
 
     private void close(){
-        System.out.println("Itch is shutting down.");
+        Itch.log.info("Itch is shutting down.");
 
         // shut down the socket acceptor
         socketAcceptor.interrupt();
         try {
             socketAcceptor.join(1000);
         } catch(InterruptedException ix){
-            System.out.println("Warning: the shutdown hook was interruped while waiting for the SocketAcceptorThread to stop");
+            Itch.log.warning("The shutdown hook was interruped while waiting for the SocketAcceptorThread to stop");
         }
 
         // shut down executor threads 
         executor.shutdown();
 
         // shut down heartbeat readers
-        System.out.println("Closing inbound connections");
+        Itch.log.info("Closing inbound connections");
         for(HeartBeatReader hbReader: heartbeatReaders){
             hbReader.close();
         }
 
-        System.out.println("Closing outbound connections");
+        Itch.log.info("Closing outbound connections");
         for(HeartBeatWriter hbWriter: heartbeatWriters){
             hbWriter.close();
         }
 
-        System.out.println("Shutdown is complete.");
+        Itch.log.info("Shutdown is complete.");
     }
 
     private  ServerSocketChannel openServerSocket(){
-        ServerSocketChannel serverSocketChannel = null;
+        ServerSocketChannel serverSocketChannel;
         try {
             serverSocketChannel = ServerSocketChannel.open();
         } catch (IOException e) {
-            System.out.println("An error occurred in ServerSocketChannel.open: " + e.getMessage());
+            Itch.log.severe("Failed to open server socket." + e);
             return null;  // RETURN
         }
 
         SocketAddress localAddress = null;
         for(int i=0; i < addresses.length; ++i){
             InetSocketAddress address = addresses[i];
-            if (address == null){
-                System.out.println("At least one member address could not be read.");
-                return null; //RETURN
-            }
+            // these have already been checked for null
 
             try {
                 localAddress = serverSocketChannel.getLocalAddress();
@@ -255,14 +313,18 @@ public class Itch {
         }
         
         if (localAddress == null){
-            System.out.println("None of the members specify an interface on this host");
+            Itch.log.severe("None of the members specify an interface on this host");
             return null;  // RETURN
         }
 
-        System.out.println("listening on " + localAddress); 
+        Itch.log.info("listening on " + localAddress);
         return serverSocketChannel;
     }
-   
+
+    private static String now(){
+        return new SimpleDateFormat(TIMESTAMP_FORMAT).format(System.currentTimeMillis());
+    }
+
     private class SocketAcceptorThread extends Thread {
         public SocketAcceptorThread(){
             super();
@@ -276,7 +338,8 @@ public class Itch {
                     SocketChannel socket = serverSocketChannel.accept();
                     socket.configureBlocking(false);
 
-                    System.out.println("Received new connection from " + socket.getRemoteAddress());
+                    Itch.log.info("Received a new connection from " + socket.getRemoteAddress());
+
                     HeartBeatReader hbReader = new HeartBeatReader(socket);
                     heartbeatReaders.add(hbReader);
                     executor.scheduleAtFixedRate(hbReader, 1, 1, TimeUnit.SECONDS);
@@ -284,10 +347,10 @@ public class Itch {
                     // this is expected during shutdown
                     break;
                 } catch(IOException x){
-                    System.out.println("An error occurred while accepting a connection: " + x.getMessage());
+                    Itch.log.log(Level.WARNING, "An error occurred while accepting a connection.", x);
                 }
             }
-            System.out.println("SocketAcceptorThread has finished.");
+            Itch.log.info("SocketAcceptorThread has finished");
         }
     }
 }
