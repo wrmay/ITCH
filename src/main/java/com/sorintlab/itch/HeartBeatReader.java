@@ -18,14 +18,20 @@ public class HeartBeatReader implements Runnable {
     private String remoteAddress;
     private long lastHeartbeat;
 
-    public HeartBeatReader(SocketChannel channel) throws IOException {
+    public HeartBeatReader(SocketChannel channel, HeartBeatFactory factory) throws IOException {
         this.channel = channel;
         this.channel.configureBlocking(false);
-        this.byteBuffer = ByteBuffer.allocate(2048);
+
         this.heartbeat = null;
         this.state = State.AWAITING_HB;
         this.localAddress = channel.getLocalAddress().toString();
         this.remoteAddress = channel.getRemoteAddress().toString();
+
+        HeartBeat sampleHB = factory.newHeartBeat();
+        sampleHB.setSender(remoteAddress);  // when it comes in off the wire, receiver will not have been set
+        long bufferSize = sampleHB.serializedSize();
+        //bufferSize = (bufferSize * 6) / 5;  // allow 20% extra just in case there has been some miscalculation
+        this.byteBuffer = ByteBuffer.allocate((int) bufferSize + 2 + 2 + 4);  // +2 (H) +2 (B) +4 (int bytes)
     }
 
     @Override
@@ -57,13 +63,13 @@ public class HeartBeatReader implements Runnable {
 
        Read whatever is available in the socket (may be nothing).
        
-       If less than 4 bytes are availbe, return false.   
+       If less than 4 bytes are available, return false.
        
        Otherwise read 2 chars which should be 'H' and 'B'.  If they are not then throw those 4 bytes away by reading 
        them from the buffer and compacting it, then return false. 
        
-       If the expected chars are found, if less than 4 more bytes are available, return false.  Otherwise, read an 
-       integer indicating the size in bytes of the heartbeat payload.  
+       If the expected chars are found, if less than 4 additional bytes are available, return false.  Otherwise, read an
+       integer indicating the size in bytes of the serialized heartbeat.
        
        If less than those number of additional bytes is available, return false.  Otherwise, read all fields 
        of the heartbeat and return true;

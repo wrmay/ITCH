@@ -11,8 +11,10 @@ public class HeartBeat {
     private long sendTime;
     private long receiveTime;
     private int sequence;
+    private byte []payload;
 
-    public HeartBeat(){
+
+    public  HeartBeat(){
         // to reduce serialization complexity, null values are not allowed in sender and receiver
         sender = "";
         receiver = "";
@@ -24,36 +26,49 @@ public class HeartBeat {
     public void setSender(String sender) {
         this.sender = sender;
     }
+
     public String getReceiver() {
         return receiver;
     }
     public void setReceiver(String receiver) {
         this.receiver = receiver;
     }
+
     public long getSendTime() {
         return sendTime;
     }
     public void setSendTime(long sendTime) {
         this.sendTime = sendTime;
     }
+
     public long getReceiveTime() {
         return receiveTime;
     }
     public void setReceiveTime(long receiveTime) {
         this.receiveTime = receiveTime;
     }
+
     public int getSequence() {
         return sequence;
     }
     public void setSequence(int sequence) {
         this.sequence = sequence;
     }
-    
-    /* 
-     Note: it is the caller's responsibility to make sure that there is sufficient data 
+
+    public byte[] getPayload() {
+        return payload;
+    }
+    public void setPayload(byte[] payload) {
+        this.payload = payload;
+    }
+
+    /*
+     Note: it is the caller's responsibility to make sure that there is sufficient data
      in the buffer to read the entire heartbeat
     */
     public static HeartBeat readFrom(ByteBuffer buffer){
+        // its ok not to use a factory here because we will learn the payload size and content
+        // from the serialzed bytes
         HeartBeat result = new HeartBeat();
 
         int senderBytes = buffer.getInt();
@@ -77,11 +92,25 @@ public class HeartBeat {
         result.receiveTime = buffer.getLong();
         result.sequence = buffer.getInt();
 
+        int payloadSize = buffer.getInt();
+        byte []payload = new byte[payloadSize];
+
+        buffer.get(payload);
+        result.setPayload(payload);
+
         return result;
     }
-    
+
+    public int serializedSize(){
+        return serializedSize(sender.getBytes().length, receiver.getBytes().length);
+    }
+
+    private int serializedSize(int senderBytes, int receiverBytes){
+        return 4 + senderBytes + 4 + receiverBytes  + 8 + 8 + 4 + 4 + payload.length;
+    }
+
    /*
-    Writes the size in bytes, then the data
+    Writes the size in bytes, then the data - the buffer must have sufficient capacity!
    */
    public  void writeTo(ByteBuffer buffer){
        int senderBytes = 0;
@@ -100,7 +129,7 @@ public class HeartBeat {
             receiverBytes = receiverBuf.length;
         }
 
-        int size = senderBytes + receiverBytes  + 8 + 8 + 4;
+        int size = serializedSize(senderBytes, receiverBytes);
         buffer.putInt(size);
 
         buffer.putInt(senderBytes);
@@ -112,12 +141,18 @@ public class HeartBeat {
         buffer.putLong(sendTime);
         buffer.putLong(receiveTime);
         buffer.putInt(sequence);
+
+        buffer.putInt(payload.length);
+        buffer.put(payload);
    }
 
    @Override
    public String toString(){
        DateFormat fmt = new SimpleDateFormat(Itch.TIMESTAMP_FORMAT);
-       return "HeartBeat [ SENDER=" + sender + " at " + fmt.format(new Date(sendTime)) + " RECEIVER=" + receiver + " at " + fmt.format(new Date(receiveTime)) + " SEQ=" + sequence + " ]";
+       return "HeartBeat [ SENDER=" + sender + " at " + fmt.format(new Date(sendTime)) +
+               " RECEIVER=" + receiver + " at " + fmt.format(new Date(receiveTime)) +
+               " TIME DELTA=" + (receiveTime - sendTime) + "ms SEQ=" + sequence +
+               " PAYLOAD BYTES=" + payload.length + " ]";
    }
 
 

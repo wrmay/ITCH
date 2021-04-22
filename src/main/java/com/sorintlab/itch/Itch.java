@@ -67,7 +67,7 @@ public class Itch {
         }
 
         try {
-            Itch itch = new Itch(addresses);
+            Itch itch = new Itch(addresses, config.getPayloadBytes());
         } catch(RuntimeException x){
             Itch.log.log(Level.SEVERE, "An unexpected exception occurred", x);
             System.exit(1);
@@ -173,14 +173,17 @@ public class Itch {
     private LinkedList<HeartBeatReader> heartbeatReaders;
     private LinkedList<HeartBeatWriter> heartbeatWriters;
     private ScheduledExecutorService executor;
+    private HeartBeatFactory heartBeatFactory;
 
-    public Itch(InetSocketAddress []addresses){
+    public Itch(InetSocketAddress []addresses, int payloadBytes){
+        this.heartBeatFactory = new HeartBeatFactory(payloadBytes);
+
         this.addresses = addresses;
         this.heartbeatReaders = new LinkedList<>();
         this.heartbeatWriters = new LinkedList<>();
         this.executor = Executors.newScheduledThreadPool(4);
 
-        // set up the serverSocketChannel - this has to happen before attempting top open outbound sockets
+        // set up the serverSocketChannel - this has to happen before attempting to open outbound sockets
         this.serverSocketChannel = openServerSocket();
         if (this.serverSocketChannel == null) {
             throw new RuntimeException("An erorr occurred while opening the ServerSocketChannel");
@@ -193,7 +196,7 @@ public class Itch {
             try {
                 SocketChannel channel = waitForConnection(addresses[i]);
                 channel.configureBlocking(false);
-                HeartBeatWriter hbWriter = new HeartBeatWriter(channel);
+                HeartBeatWriter hbWriter = new HeartBeatWriter(channel, heartBeatFactory);
                 heartbeatWriters.add(hbWriter);
                 executor.scheduleAtFixedRate(hbWriter, 1, 1, TimeUnit.SECONDS);
             } catch(IOException x){
@@ -321,10 +324,6 @@ public class Itch {
         return serverSocketChannel;
     }
 
-    private static String now(){
-        return new SimpleDateFormat(TIMESTAMP_FORMAT).format(System.currentTimeMillis());
-    }
-
     private class SocketAcceptorThread extends Thread {
         public SocketAcceptorThread(){
             super();
@@ -340,7 +339,7 @@ public class Itch {
 
                     Itch.log.info("Received a new connection from " + socket.getRemoteAddress());
 
-                    HeartBeatReader hbReader = new HeartBeatReader(socket);
+                    HeartBeatReader hbReader = new HeartBeatReader(socket, heartBeatFactory);
                     heartbeatReaders.add(hbReader);
                     executor.scheduleAtFixedRate(hbReader, 1, 1, TimeUnit.SECONDS);
                 } catch(ClosedByInterruptException cbix){

@@ -16,22 +16,43 @@ public class HeartBeatWriter implements Runnable {
     private String remoteAddress;
     private int sequence;
 
+    private HeartBeatFactory heartBeatFactory;
 
-    public HeartBeatWriter(SocketChannel channel) throws IOException {
+
+    public HeartBeatWriter(SocketChannel channel, HeartBeatFactory heartBeatFactory) throws IOException {
+        this.heartBeatFactory = heartBeatFactory;
         this.channel = channel;
         this.channel.configureBlocking(false);
-        this.byteBuffer = ByteBuffer.allocate(2048);
         this.state = State.READY;
         this.localAddress = channel.getLocalAddress().toString();
         this.remoteAddress = channel.getRemoteAddress().toString();
         this.sequence = 1;
+
+        // this one is only for sizing purposes
+        HeartBeat testhb = heartBeatFactory.newHeartBeat();
+        testhb.setSender(this.localAddress);
+        long bufSize = testhb.serializedSize();
+
+        // make if 20% larger than needed just in case the heartbeat serialized size is incorrect
+//        bufSize = (bufSize * 6) / 5;
+
+        Itch.log.fine("HearBeatWriter allocated " + bufSize + " byte buffer");
+        this.byteBuffer = ByteBuffer.allocate((int) bufSize + 2 + 2 + 4);  // +2 (H) +2 (B) +4 (int bytes)
     }
 
+    /*
+       Creates a new Heartbeat, serializes it to the byte buffer and attempts to write the buffer to
+       the socket channel.  If all of the serialized data cannot be written to the socket channel then
+       then the unsent portion will remain in the byte buffer and the next time this is called, it will
+       attempt to send the remaining bytes.  No new heartbeat will be generated until the previous one
+       has been fully written to the socket channel.
+     */
     @Override
     public void run(){
+        Itch.log.fine("Running HeartBeatWriter for " + this.remoteAddress);
         try {
             if (state == State.READY){
-                HeartBeat hb = new HeartBeat();
+                HeartBeat hb = heartBeatFactory.newHeartBeat();
                 hb.setSender(this.localAddress);
                 hb.setSendTime(System.currentTimeMillis());
                 hb.setSequence(sequence++);
@@ -56,7 +77,7 @@ public class HeartBeatWriter implements Runnable {
                 Itch.log.warning("Could not send all heartbeat bytes to " + remoteAddress + " no more heartbeats will be sent until this heartbeat can be written to the socket");
             }
 
-        } catch(IOException x){
+        } catch(Exception x){
             Itch.log.log(Level.WARNING, "An error occurred while attempting to send a heartbeat to " + remoteAddress ,x);
             state = State.READY;
         }
