@@ -20,5 +20,11 @@ Consider a virtualization pause.  This is not something that can be noticed by a
 
 This is exactly what itch does.  
 
+Hows it work ...
+
+Future Directions ...
+
+Contact ...
+
 
 
