@@ -33,9 +33,6 @@ public class HeartBeatWriter implements Runnable {
         testhb.setSender(this.localAddress);
         long bufSize = testhb.serializedSize();
 
-        // make if 20% larger than needed just in case the heartbeat serialized size is incorrect
-//        bufSize = (bufSize * 6) / 5;
-
         Itch.log.fine("HearBeatWriter allocated " + bufSize + " byte buffer");
         this.byteBuffer = ByteBuffer.allocate((int) bufSize + 2 + 2 + 4);  // +2 (H) +2 (B) +4 (int bytes)
     }

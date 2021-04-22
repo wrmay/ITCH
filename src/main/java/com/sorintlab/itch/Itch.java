@@ -100,7 +100,7 @@ public class Itch {
             }
         };
 
-        result.setLevel(Level.ALL);
+        result.setLevel(Level.INFO);  // change this for debug
         result.setUseParentHandlers(false);
 
         fileHandler.setFormatter(formatter);

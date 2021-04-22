@@ -30,7 +30,7 @@ public class HeartBeatReader implements Runnable {
         HeartBeat sampleHB = factory.newHeartBeat();
         sampleHB.setSender(remoteAddress);  // when it comes in off the wire, receiver will not have been set
         long bufferSize = sampleHB.serializedSize();
-        //bufferSize = (bufferSize * 6) / 5;  // allow 20% extra just in case there has been some miscalculation
+
         this.byteBuffer = ByteBuffer.allocate((int) bufferSize + 2 + 2 + 4);  // +2 (H) +2 (B) +4 (int bytes)
     }
 
