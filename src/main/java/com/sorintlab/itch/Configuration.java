@@ -6,6 +6,7 @@ public class Configuration {
     private String []members;
     private int maxLogFileMegabytes;
     private int payloadBytes;
+    private int heartbeatPeriodMs;
 
     public String[] getMembers() {
         return members;
@@ -31,12 +32,21 @@ public class Configuration {
         this.payloadBytes = payloadBytes;
     }
 
+    public int getHeartbeatPeriodMs() {
+        return heartbeatPeriodMs;
+    }
+
+    public void setHeartbeatPeriodMs(int heartbeatPeriodMs) {
+        this.heartbeatPeriodMs = heartbeatPeriodMs;
+    }
+
     @Override
     public String toString() {
         return "Configuration{" +
                 "members=" + Arrays.toString(members) +
                 ", maxLogFileMegabytes=" + maxLogFileMegabytes +
                 ", payloadBytes=" + payloadBytes +
+                ", heartbeatPeriodMs=" + heartbeatPeriodMs +
                 '}';
     }
 }

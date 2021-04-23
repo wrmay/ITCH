@@ -67,7 +67,7 @@ public class Itch {
         }
 
         try {
-            Itch itch = new Itch(addresses, config.getPayloadBytes());
+            Itch itch = new Itch(addresses, config.getPayloadBytes(), config.getHeartbeatPeriodMs());
         } catch(RuntimeException x){
             Itch.log.log(Level.SEVERE, "An unexpected exception occurred", x);
             System.exit(1);
@@ -175,13 +175,13 @@ public class Itch {
     private ScheduledExecutorService executor;
     private HeartBeatFactory heartBeatFactory;
 
-    public Itch(InetSocketAddress []addresses, int payloadBytes){
+    public Itch(InetSocketAddress []addresses, int payloadBytes, int heartbeatPeriodMs){
         this.heartBeatFactory = new HeartBeatFactory(payloadBytes);
 
         this.addresses = addresses;
         this.heartbeatReaders = new LinkedList<>();
         this.heartbeatWriters = new LinkedList<>();
-        this.executor = Executors.newScheduledThreadPool(4);
+        this.executor = Executors.newScheduledThreadPool(20);
 
         // set up the serverSocketChannel - this has to happen before attempting to open outbound sockets
         this.serverSocketChannel = openServerSocket();
@@ -198,7 +198,7 @@ public class Itch {
                 channel.configureBlocking(false);
                 HeartBeatWriter hbWriter = new HeartBeatWriter(channel, heartBeatFactory);
                 heartbeatWriters.add(hbWriter);
-                executor.scheduleAtFixedRate(hbWriter, 1, 1, TimeUnit.SECONDS);
+                executor.scheduleAtFixedRate(hbWriter, 1000, heartbeatPeriodMs, TimeUnit.MILLISECONDS);
             } catch(IOException x){
                 throw new RuntimeException("An error occurred while opening outbound connections: " + x.getMessage());
             }
@@ -213,7 +213,7 @@ public class Itch {
         });
 
         // start accepting connections
-        this.socketAcceptor = new SocketAcceptorThread();
+        this.socketAcceptor = new SocketAcceptorThread(heartbeatPeriodMs);
         socketAcceptor.start();
 
         // start the late heartbeat monitor thread
@@ -325,10 +325,13 @@ public class Itch {
     }
 
     private class SocketAcceptorThread extends Thread {
-        public SocketAcceptorThread(){
+        public SocketAcceptorThread(int heartbeatPeriodMs){
             super();
+            this.heartbeatPeriodMs = heartbeatPeriodMs;
             this.setDaemon(false);
         }
+
+        private int heartbeatPeriodMs;
 
         @Override
         public void run() {
@@ -341,7 +344,7 @@ public class Itch {
 
                     HeartBeatReader hbReader = new HeartBeatReader(socket, heartBeatFactory);
                     heartbeatReaders.add(hbReader);
-                    executor.scheduleAtFixedRate(hbReader, 1, 1, TimeUnit.SECONDS);
+                    executor.scheduleAtFixedRate(hbReader, 1, heartbeatPeriodMs, TimeUnit.MILLISECONDS);
                 } catch(ClosedByInterruptException cbix){
                     // this is expected during shutdown
                     break;

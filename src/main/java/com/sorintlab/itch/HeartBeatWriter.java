@@ -66,6 +66,7 @@ public class HeartBeatWriter implements Runnable {
                 Itch.log.info("SENT " + hb);
             }
 
+            Itch.log.fine("writing " + byteBuffer.remaining() +  " bytes to channel");
             channel.write(byteBuffer);
             if (!byteBuffer.hasRemaining()){
                 byteBuffer.clear();
@@ -74,7 +75,7 @@ public class HeartBeatWriter implements Runnable {
                 Itch.log.warning("Could not send all heartbeat bytes to " + remoteAddress + " no more heartbeats will be sent until this heartbeat can be written to the socket");
             }
 
-        } catch(Exception x){
+        } catch(Throwable x){
             Itch.log.log(Level.WARNING, "An error occurred while attempting to send a heartbeat to " + remoteAddress ,x);
             state = State.READY;
         }
