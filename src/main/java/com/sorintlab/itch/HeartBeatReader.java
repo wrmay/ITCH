@@ -1,5 +1,8 @@
 package com.sorintlab.itch;
 
+import io.prometheus.metrics.core.metrics.Counter;
+import io.prometheus.metrics.core.metrics.Gauge;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
@@ -7,18 +10,21 @@ import java.util.logging.Level;
 
 public class HeartBeatReader implements Runnable {
 
-    private enum State { AWAITING_HB, AWAITING_SIZE, AWAITING_DATA, HEARTBEAT_READY};
+    private enum State { AWAITING_HB, AWAITING_SIZE, AWAITING_DATA, HEARTBEAT_READY}
 
-    private ByteBuffer byteBuffer;
-    private SocketChannel channel;
+    private final ByteBuffer byteBuffer;
+    private final SocketChannel channel;
     private HeartBeat heartbeat;
     private State state;
     private int expectedBytes;
-    private String localAddress;
-    private String remoteAddress;
+    private final String localAddress;
+    private final String remoteAddress;
     private long lastHeartbeat;
 
-    public HeartBeatReader(SocketChannel channel, HeartBeatFactory factory) throws IOException {
+    private final Counter heartbeatCount;
+    private final Gauge heartbeatLatencyMs;
+
+    public HeartBeatReader(SocketChannel channel, HeartBeatFactory factory, Counter counter, Gauge gauge) throws IOException {
         this.channel = channel;
         this.channel.configureBlocking(false);
 
@@ -32,6 +38,14 @@ public class HeartBeatReader implements Runnable {
         long bufferSize = sampleHB.serializedSize();
 
         this.byteBuffer = ByteBuffer.allocate((int) bufferSize + 2 + 2 + 4);  // +2 (H) +2 (B) +4 (int bytes)
+
+        this.heartbeatCount = counter;
+        this.heartbeatLatencyMs = gauge;
+    }
+
+    private String formatLabel(String in){
+        int i = in.lastIndexOf(":");
+        return in.substring(0,i).replace(".", "_").replace("/", "");
     }
 
     @Override
@@ -42,7 +56,11 @@ public class HeartBeatReader implements Runnable {
                 hb.setReceiver(localAddress);
                 hb.setReceiveTime(System.currentTimeMillis());
                 lastHeartbeat = hb.getReceiveTime();
-                Itch.log.info("RECEIVED " + hb.toString());
+                String source = formatLabel(hb.getSender());
+                String dest = formatLabel(hb.getReceiver());
+                heartbeatCount.labelValues(source, dest).inc();
+                heartbeatLatencyMs.labelValues(source, dest).set(hb.getReceiveTime() - hb.getSendTime());
+                Itch.log.info("RECEIVED " + hb);
             }
         } catch(IOException iox){
             Itch.log.log(Level.WARNING, "An error occurred while reading a HeartBeat from " + remoteAddress, iox);
@@ -65,7 +83,7 @@ public class HeartBeatReader implements Runnable {
        
        If less than 4 bytes are available, return false.
        
-       Otherwise read 2 chars which should be 'H' and 'B'.  If they are not then throw those 4 bytes away by reading 
+       Otherwise, read 2 chars which should be 'H' and 'B'.  If they are not then throw those 4 bytes away by reading
        them from the buffer and compacting it, then return false. 
        
        If the expected chars are found, if less than 4 additional bytes are available, return false.  Otherwise, read an

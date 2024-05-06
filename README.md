@@ -23,6 +23,9 @@ to a file named itch_hostname.log in the working directory.
 
 This provides an independent record of connectivity between nodes during a period of time.
 
+Additionally, the heartbeat information can be exported as a Prometheus metric
+for automated collection.
+
 # Heartbeat Content
 - identity of the sender
 - identity of the recipient
@@ -46,6 +49,9 @@ members:
 maxLogFileMegabytes: 10
 payloadBytes: 0
 heartbeatPeriodMs: 1000
+prometheus:
+  enabled: True
+  port: 9090
 ```
 
 You can use the `heartbeatPeriodMs` setting to control the frequency with which heartbeats are sent.
@@ -54,26 +60,35 @@ You can also increase the size of the heartbeat arbitrarily by setting `payloadB
 This causes a byte array of the given size, filled with `0xff` to be sent in each heartbeat.  This can be useful
 for creating stress on the network or causing each heartbeat to be split over multiple TCP packets.
 
+To enable the Prometheus exporter, set `prometheus.enabled` to True and 
+specify the port number for the Prometheus HTTP server to listen on.  This 
+also determines the endpoint you will need to specify when configuring 
+the Prometheus collector.
+
 # Design
 Logging is done with java.util.logging.  The logging is configured programmatically, and the default configuration 
-is ignored.  Everything logs to Itch.log, which has one FileHandler and one ConsoleHandler.  See Itch.setupLogging 
-for details.
+is ignored.  Everything logs to Itch.log, which has one FileHandler and one 
+ConsoleHandler.  See Itch.setupLogging for details.
 
 All IO is via SocketChannels in async mode.
 
-For each other member in the cluster a socket connection is made, and the connection is wrapped  
-by a HeartbeatWriter, which implements Runnable.  A scheduled executor calls the run method on each HeartbeatWriter 
+For each other member in the cluster a socket connection is made, and the 
+connection is wrapped by a HeartbeatWriter, which implements Runnable.  
+A scheduled executor calls the run method on each HeartbeatWriter 
 once per second.
 
-There is also a separate, continuously running, non-daemon, socket acceptor thread.  Any time a new connection 
-is established, it is wrapped in a HeartbeatReader, which implements Runnable.  Each HeartbeatReader is run 
+There is also a separate, continuously running, non-daemon, socket acceptor 
+thread.  Any time a new connection is established, it is wrapped in a 
+HeartbeatReader, which implements Runnable.  Each HeartbeatReader is run 
 every second.  The run method reads from the socket and, if sufficient data is present, decodes it into a HeartBeat 
 object.  The recipient and receive times are set, and the HeartBeat is logged.
 
-There is also be a scheduled tasks that periodically checks the last time a hearbeat was received from every 
-other member.  If any heartbeat is delayed more than 10 seconds a record will be written.
+There is also a scheduled tasks that periodically checks the last time a 
+hearbeat was received from every other member.  If any heartbeat is delayed 
+more than 10 seconds a record will be written.
 
-The protocol between sender and receiver is a custom binary protocol. See HeartBeatReader.read for details.
+The protocol between sender and receiver is a custom binary protocol. See 
+HeartBeatReader.read for details.
 
 # Enhancements
 

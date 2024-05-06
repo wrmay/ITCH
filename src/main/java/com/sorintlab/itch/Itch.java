@@ -1,5 +1,13 @@
 package com.sorintlab.itch;
 
+import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import io.prometheus.metrics.core.metrics.Counter;
+import io.prometheus.metrics.core.metrics.Gauge;
+import io.prometheus.metrics.exporter.httpserver.HTTPServer;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -18,11 +26,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import com.fasterxml.jackson.core.JsonParseException;
-import com.fasterxml.jackson.databind.JsonMappingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 
 public class Itch {
@@ -73,8 +76,18 @@ public class Itch {
             System.exit(1);
         }
 
+        if (config.getPrometheus().isEnabled()){
+            try {
+                HTTPServer prometheusServer =
+                        HTTPServer.builder().port(config.getPrometheus().getPort()).buildAndStart();
+                Runtime.getRuntime().addShutdownHook(new Thread(prometheusServer::close));
+            } catch (IOException e) {
+                e.printStackTrace(System.err);
+                System.exit(1);
+            }
+        }
+
         // note: the system will not exit because the socket acceptor thread is not a daemon
-        //       I suppose it might make sense to just put that loop here
     }
 
     private static Logger setupLogging(Configuration config, String hostname) throws IOException {
@@ -125,8 +138,10 @@ public class Itch {
         try {
             result = mapper.readValue(configFile, Configuration.class);
         } catch (JsonParseException e) {
+            e.printStackTrace(System.err);
             System.out.println("Could not parse configuration file");
         } catch (JsonMappingException e) {
+            e.printStackTrace(System.err);
             System.out.println("Configuration file does not have the expected format");
         } catch (IOException e) {
             System.out.println("Could not read the configuration file");
@@ -175,7 +190,22 @@ public class Itch {
     private ScheduledExecutorService executor;
     private HeartBeatFactory heartBeatFactory;
 
+    private Counter heartbeatCount;
+    private Gauge heartbeatLatencyMs;
+
     public Itch(InetSocketAddress []addresses, int payloadBytes, int heartbeatPeriodMs){
+        this.heartbeatCount = Counter.builder()
+                .name("heartbeat_count")
+                .help("number of heartbeats received")
+                .labelNames("source","destination")
+                .register();
+
+        this.heartbeatLatencyMs = Gauge.builder()
+                .name("heartbeat_latency_ms")
+                .help("time difference in milliseconds between the receive timestamp and the send timestamp")
+                .labelNames("source","destination")
+                .register();
+
         this.heartBeatFactory = new HeartBeatFactory(payloadBytes);
 
         this.addresses = addresses;
@@ -205,12 +235,7 @@ public class Itch {
         }
 
         // register shutdown hook
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run(){
-                close();
-            }
-        });
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> close()));
 
         // start accepting connections
         this.socketAcceptor = new SocketAcceptorThread(heartbeatPeriodMs);
@@ -342,7 +367,7 @@ public class Itch {
 
                     Itch.log.info("Received a new connection from " + socket.getRemoteAddress());
 
-                    HeartBeatReader hbReader = new HeartBeatReader(socket, heartBeatFactory);
+                    HeartBeatReader hbReader = new HeartBeatReader(socket, heartBeatFactory, heartbeatCount, heartbeatLatencyMs);
                     heartbeatReaders.add(hbReader);
                     executor.scheduleAtFixedRate(hbReader, 1, heartbeatPeriodMs, TimeUnit.MILLISECONDS);
                 } catch(ClosedByInterruptException cbix){

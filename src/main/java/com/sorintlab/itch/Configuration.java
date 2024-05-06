@@ -8,6 +8,16 @@ public class Configuration {
     private int payloadBytes;
     private int heartbeatPeriodMs;
 
+    private PrometheusConfig prometheus;
+
+    public PrometheusConfig getPrometheus() {
+        return prometheus;
+    }
+
+    public void setPrometheus(PrometheusConfig prometheus) {
+        this.prometheus = prometheus;
+    }
+
     public String[] getMembers() {
         return members;
     }
@@ -47,6 +57,36 @@ public class Configuration {
                 ", maxLogFileMegabytes=" + maxLogFileMegabytes +
                 ", payloadBytes=" + payloadBytes +
                 ", heartbeatPeriodMs=" + heartbeatPeriodMs +
+                ", prometheusConfig=" + prometheus +
                 '}';
+    }
+
+    public static class PrometheusConfig {
+        private boolean enabled;
+        private int port;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int getPort() {
+            return port;
+        }
+
+        public void setPort(int port) {
+            this.port = port;
+        }
+
+        @Override
+        public String toString() {
+            return "PrometheusConfig{" +
+                    "enabled=" + enabled +
+                    ", port=" + port +
+                    '}';
+        }
     }
 }

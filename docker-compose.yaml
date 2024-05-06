@@ -4,6 +4,8 @@ services:
     image: adoptopenjdk
     volumes:
     - ".:/opt/project"
+    ports:
+      - "9091:9090"
     networks:
       default-net:
         ipv4_address: 192.168.1.101
@@ -15,6 +17,8 @@ services:
     image: adoptopenjdk
     volumes:
       - ".:/opt/project"
+    ports:
+      - "9092:9090"
     networks:
       default-net:
         ipv4_address: 192.168.1.102
@@ -26,6 +30,8 @@ services:
     image: adoptopenjdk
     volumes:
       - ".:/opt/project"
+    ports:
+      - "9093:9090"
     networks:
       default-net:
         ipv4_address: 192.168.1.103
