@@ -13,28 +13,21 @@ public class HeartBeatReader implements Runnable {
     private enum State { AWAITING_HB, AWAITING_SIZE, AWAITING_DATA, HEARTBEAT_READY}
 
     private final ByteBuffer byteBuffer;
-    private final SocketChannel channel;
+    private SocketChannel channel;
     private HeartBeat heartbeat;
     private State state;
     private int expectedBytes;
-    private final String localAddress;
-    private final String remoteAddress;
     private long lastHeartbeat;
 
     private final Counter heartbeatCount;
     private final Gauge heartbeatLatencyMs;
 
-    public HeartBeatReader(SocketChannel channel, HeartBeatFactory factory, Counter counter, Gauge gauge) throws IOException {
-        this.channel = channel;
-        this.channel.configureBlocking(false);
-
+    public HeartBeatReader(HeartBeatFactory factory, Counter counter, Gauge gauge) throws IOException {
         this.heartbeat = null;
         this.state = State.AWAITING_HB;
-        this.localAddress = channel.getLocalAddress().toString();
-        this.remoteAddress = channel.getRemoteAddress().toString();
 
         HeartBeat sampleHB = factory.newHeartBeat();
-        sampleHB.setSender(remoteAddress);  // when it comes in off the wire, receiver will not have been set
+        sampleHB.setSender("xxx.xxx.xxx.xxx");
         long bufferSize = sampleHB.serializedSize();
 
         this.byteBuffer = ByteBuffer.allocate((int) bufferSize + 2 + 2 + 4);  // +2 (H) +2 (B) +4 (int bytes)
@@ -48,12 +41,17 @@ public class HeartBeatReader implements Runnable {
         return in.substring(0,i).replace(".", "_").replace("/", "");
     }
 
+    public void setSocketChannel(SocketChannel channel){
+        this.channel = channel;
+    }
+
+
     @Override
     public void run(){
         try {
             if (this.read()){
                 HeartBeat hb = this.getHeartBeat();
-                hb.setReceiver(localAddress);
+                hb.setReceiver(channel.getLocalAddress().toString());
                 hb.setReceiveTime(System.currentTimeMillis());
                 lastHeartbeat = hb.getReceiveTime();
                 String source = formatLabel(hb.getSender());
@@ -63,7 +61,13 @@ public class HeartBeatReader implements Runnable {
                 Itch.log.info("RECEIVED " + hb);
             }
         } catch(IOException iox){
-            Itch.log.log(Level.WARNING, "An error occurred while reading a HeartBeat from " + remoteAddress, iox);
+            String remoteAddress = "unknown";
+            try {
+                channel.getRemoteAddress().toString();
+            } catch(IOException x){
+                // no action needed
+            }
+            Itch.log.log(Level.WARNING, "An error occurred while reading a HeartBeat from " + getRemoteAddress(), iox);
         }
     }
 
@@ -158,6 +162,12 @@ public class HeartBeatReader implements Runnable {
     }
 
     public String getRemoteAddress(){
-        return this.remoteAddress;
+        String result = "unknown";
+        try {
+            return channel.getRemoteAddress().toString();
+        } catch(IOException iox){
+            // no action needed
+        }
+        return result;
     }
 }

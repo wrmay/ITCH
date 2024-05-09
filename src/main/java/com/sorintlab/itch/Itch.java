@@ -14,12 +14,12 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.UnknownHostException;
-import java.nio.channels.ClosedByInterruptException;
-import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
+import java.nio.channels.*;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
+import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -181,17 +181,19 @@ public class Itch {
 
 
     /// instance state 
-    private SocketAcceptorThread socketAcceptor;
-    private ServerSocketChannel serverSocketChannel;
-    private InetSocketAddress []addresses;
+    private final SocketAcceptorThread socketAcceptor;
+    private final ServerSocketChannel serverSocketChannel;
+    private final InetSocketAddress []addresses;
     private int localAddressNum;
-    private LinkedList<HeartBeatReader> heartbeatReaders;
-    private LinkedList<HeartBeatWriter> heartbeatWriters;
-    private ScheduledExecutorService executor;
-    private HeartBeatFactory heartBeatFactory;
+    private final LinkedList<HeartBeatReader> heartbeatReaders;
+    private final LinkedList<HeartBeatWriter> heartbeatWriters;
+    private final ScheduledExecutorService executor;
+    private final HeartBeatFactory heartBeatFactory;
 
-    private Counter heartbeatCount;
-    private Gauge heartbeatLatencyMs;
+    private final Selector selector;
+
+    private final Counter heartbeatCount;
+    private final Gauge heartbeatLatencyMs;
 
     public Itch(InetSocketAddress []addresses, int payloadBytes, int heartbeatPeriodMs){
         this.heartbeatCount = Counter.builder()
@@ -214,16 +216,22 @@ public class Itch {
         this.executor = Executors.newScheduledThreadPool(20);
 
         // set up the serverSocketChannel - this has to happen before attempting to open outbound sockets
+        try {
+            this.selector = Selector.open();
+        } catch(IOException iox){
+            throw new RuntimeException("An error occurred while creating a selector", iox);
+        }
         this.serverSocketChannel = openServerSocket();
         if (this.serverSocketChannel == null) {
-            throw new RuntimeException("An erorr occurred while opening the ServerSocketChannel");
+            throw new RuntimeException("An error occurred while opening the ServerSocketChannel");
         }
 
-        // set up the outbound hearbeat writers
+        // set up the outbound heartbeat writers
         for(int i=0;i < addresses.length; ++i){
             if (i == localAddressNum) continue;
 
             try {
+                // wait for a successful connection to each remote server
                 SocketChannel channel = waitForConnection(addresses[i]);
                 channel.configureBlocking(false);
                 HeartBeatWriter hbWriter = new HeartBeatWriter(channel, heartBeatFactory);
@@ -235,25 +243,53 @@ public class Itch {
         }
 
         // register shutdown hook
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> close()));
+        Runtime.getRuntime().addShutdownHook(new Thread(this::close));
 
         // start accepting connections
-        this.socketAcceptor = new SocketAcceptorThread(heartbeatPeriodMs);
+        this.socketAcceptor = new SocketAcceptorThread();
         socketAcceptor.start();
 
         // start the late heartbeat monitor thread
-        executor.scheduleAtFixedRate(new Runnable(){
-            @Override
-            public void run() {
-                DateFormat fmt = new SimpleDateFormat(TIMESTAMP_FORMAT);
-                long now = System.currentTimeMillis();
-                for(HeartBeatReader reader: heartbeatReaders){
-                    if (  now - reader.getLastHeartbeat() > 10000){
-                        Itch.log.warning("there have been no heart beats from " + reader.getRemoteAddress() + " since " + fmt.format(reader.getLastHeartbeat()));
-                    }
+        executor.scheduleAtFixedRate(() -> {
+            DateFormat fmt = new SimpleDateFormat(TIMESTAMP_FORMAT);
+            long now = System.currentTimeMillis();
+//            Itch.log.info("Checking last heartbeat for " + heartbeatReaders.size() + " heartbeat readers");
+            for(HeartBeatReader reader: heartbeatReaders){
+                if (  now - reader.getLastHeartbeat() > 10000){
+                    Itch.log.warning("there have been no heart beats from " + reader.getRemoteAddress() + " since " + fmt.format(reader.getLastHeartbeat()));
                 }
             }
         }, 30, 10, TimeUnit.SECONDS);
+
+        // now monitor the selector and dispatch readers
+        Thread selectorThread = new Thread( ()-> {
+            while(!Thread.currentThread().isInterrupted()){
+                try {
+                    System.out.println("SELECTING ...");
+                    System.out.flush();
+                    int ready = selector.select(5000);
+                    if (ready < 1) continue;  //CONTINUE
+                    Set<SelectionKey> selectedKeys = selector.selectedKeys();
+                    System.out.println("SELECTED " + selectedKeys.size() + " channels");
+                    System.out.flush();
+                    Iterator<SelectionKey> it = selectedKeys.iterator();
+                    while(it.hasNext()){
+                        SelectionKey k = it.next();
+                        HeartBeatReader hbr = (HeartBeatReader) k.attachment();
+                        hbr.setSocketChannel((SocketChannel) k.channel());
+
+                        // dispatch a thread to read this channel
+                        executor.schedule(hbr, 0, TimeUnit.SECONDS);
+                        it.remove();
+                    }
+                } catch(IOException iox){
+                    throw new RuntimeException();
+                }
+            }
+            Itch.log.info("Selector loop is exiting");
+        });
+        selectorThread.setDaemon(true);
+        selectorThread.start();
     }
 
     private SocketChannel waitForConnection(InetSocketAddress address) throws IOException {
@@ -331,6 +367,7 @@ public class Itch {
                 localAddress = serverSocketChannel.getLocalAddress();
                 if (localAddress == null){
                     serverSocketChannel.bind(address);
+                    serverSocketChannel.configureBlocking(true);
                     localAddress = serverSocketChannel.getLocalAddress();
                     localAddressNum = i;
                     break; // BREAK
@@ -350,13 +387,10 @@ public class Itch {
     }
 
     private class SocketAcceptorThread extends Thread {
-        public SocketAcceptorThread(int heartbeatPeriodMs){
+        public SocketAcceptorThread(){
             super();
-            this.heartbeatPeriodMs = heartbeatPeriodMs;
             this.setDaemon(false);
         }
-
-        private int heartbeatPeriodMs;
 
         @Override
         public void run() {
@@ -367,9 +401,13 @@ public class Itch {
 
                     Itch.log.info("Received a new connection from " + socket.getRemoteAddress());
 
-                    HeartBeatReader hbReader = new HeartBeatReader(socket, heartBeatFactory, heartbeatCount, heartbeatLatencyMs);
+                    HeartBeatReader hbReader = new HeartBeatReader(
+                            heartBeatFactory,
+                            heartbeatCount,
+                            heartbeatLatencyMs);
+
                     heartbeatReaders.add(hbReader);
-                    executor.scheduleAtFixedRate(hbReader, 1, heartbeatPeriodMs, TimeUnit.MILLISECONDS);
+                    socket.register(selector, SelectionKey.OP_READ, hbReader);
                 } catch(ClosedByInterruptException cbix){
                     // this is expected during shutdown
                     break;
