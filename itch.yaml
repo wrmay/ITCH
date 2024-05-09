@@ -6,6 +6,9 @@ members:
 maxLogFileMegabytes: 10
 payloadBytes: 0
 heartbeatPeriodMs: 1000
+logging:
+  fileEnabled: False
+  consoleEnabled: False
 prometheus:
   enabled: True
   port: 9090

@@ -10,6 +10,8 @@ public class Configuration {
 
     private PrometheusConfig prometheus;
 
+    private LoggingConfig logging;
+
     public PrometheusConfig getPrometheus() {
         return prometheus;
     }
@@ -50,6 +52,14 @@ public class Configuration {
         this.heartbeatPeriodMs = heartbeatPeriodMs;
     }
 
+    public LoggingConfig getLogging() {
+        return logging;
+    }
+
+    public void setLogging(LoggingConfig logging) {
+        this.logging = logging;
+    }
+
     @Override
     public String toString() {
         return "Configuration{" +
@@ -57,7 +67,8 @@ public class Configuration {
                 ", maxLogFileMegabytes=" + maxLogFileMegabytes +
                 ", payloadBytes=" + payloadBytes +
                 ", heartbeatPeriodMs=" + heartbeatPeriodMs +
-                ", prometheusConfig=" + prometheus +
+                ", prometheus=" + prometheus +
+                ", logging=" + logging +
                 '}';
     }
 
@@ -86,6 +97,35 @@ public class Configuration {
             return "PrometheusConfig{" +
                     "enabled=" + enabled +
                     ", port=" + port +
+                    '}';
+        }
+    }
+
+    public static class LoggingConfig {
+        private boolean fileEnabled;
+        private boolean consoleEnabled;
+
+        public boolean isFileEnabled() {
+            return fileEnabled;
+        }
+
+        public void setFileEnabled(boolean fileEnabled) {
+            this.fileEnabled = fileEnabled;
+        }
+
+        public boolean isConsoleEnabled() {
+            return consoleEnabled;
+        }
+
+        public void setConsoleEnabled(boolean consoleEnabled) {
+            this.consoleEnabled = consoleEnabled;
+        }
+
+        @Override
+        public String toString() {
+            return "LoggingConfig{" +
+                    "fileEnabled=" + fileEnabled +
+                    ", consoleEnabled=" + consoleEnabled +
                     '}';
         }
     }

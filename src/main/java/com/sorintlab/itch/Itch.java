@@ -93,7 +93,12 @@ public class Itch {
     private static Logger setupLogging(Configuration config, String hostname) throws IOException {
         String logFileName = hostname == null ? "itch.log" : "itch_" + hostname + ".log";
         Logger result = Logger.getLogger("itch");
-        FileHandler fileHandler = new FileHandler(logFileName, config.getMaxLogFileMegabytes() * 1024 * 1024, 1);
+        result.setUseParentHandlers(false);
+        if (config.getLogging().isConsoleEnabled() || config.getLogging().isFileEnabled()){
+            result.setLevel(Level.INFO);  // change this for debug
+        } else {
+            result.setLevel(Level.OFF);
+        }
 
         Formatter formatter = new Formatter(){
             // TODO - research whether this instance can be called from multiple threads and
@@ -113,18 +118,19 @@ public class Itch {
             }
         };
 
-        result.setLevel(Level.INFO);  // change this for debug
-        result.setUseParentHandlers(false);
+        if (config.getLogging().isFileEnabled()) {
+            FileHandler fileHandler = new FileHandler(logFileName, config.getMaxLogFileMegabytes() * 1024 * 1024, 1);
+            fileHandler.setFormatter(formatter);
+            result.addHandler(fileHandler);
+            System.out.println("logging  to " + new File(logFileName).getAbsolutePath());
+        }
 
-        fileHandler.setFormatter(formatter);
-        result.addHandler(fileHandler);
+        if (config.getLogging().isConsoleEnabled()){
+            ConsoleHandler consoleHandler = new ConsoleHandler();
+            consoleHandler.setFormatter(formatter);
+            result.addHandler(consoleHandler);
+        }
 
-        ConsoleHandler consoleHandler = new ConsoleHandler();
-        consoleHandler.setLevel(Level.WARNING);
-        consoleHandler.setFormatter(formatter);
-        result.addHandler(consoleHandler);
-
-        System.out.println("logging  to " + new File(logFileName).getAbsolutePath());
         return result;
     }
 
@@ -181,17 +187,17 @@ public class Itch {
 
 
     /// instance state 
-    private SocketAcceptorThread socketAcceptor;
-    private ServerSocketChannel serverSocketChannel;
-    private InetSocketAddress []addresses;
+    private final SocketAcceptorThread socketAcceptor;
+    private final ServerSocketChannel serverSocketChannel;
+    private final InetSocketAddress []addresses;
     private int localAddressNum;
-    private LinkedList<HeartBeatReader> heartbeatReaders;
-    private LinkedList<HeartBeatWriter> heartbeatWriters;
-    private ScheduledExecutorService executor;
-    private HeartBeatFactory heartBeatFactory;
+    private final LinkedList<HeartBeatReader> heartbeatReaders;
+    private final LinkedList<HeartBeatWriter> heartbeatWriters;
+    private final ScheduledExecutorService executor;
+    private final HeartBeatFactory heartBeatFactory;
 
-    private Counter heartbeatCount;
-    private Gauge heartbeatLatencyMs;
+    private final Counter heartbeatCount;
+    private final Gauge heartbeatLatencyMs;
 
     public Itch(InetSocketAddress []addresses, int payloadBytes, int heartbeatPeriodMs){
         this.heartbeatCount = Counter.builder()
@@ -216,10 +222,10 @@ public class Itch {
         // set up the serverSocketChannel - this has to happen before attempting to open outbound sockets
         this.serverSocketChannel = openServerSocket();
         if (this.serverSocketChannel == null) {
-            throw new RuntimeException("An erorr occurred while opening the ServerSocketChannel");
+            throw new RuntimeException("An error occurred while opening the ServerSocketChannel");
         }
 
-        // set up the outbound hearbeat writers
+        // set up the outbound heartbeat writers
         for(int i=0;i < addresses.length; ++i){
             if (i == localAddressNum) continue;
 
@@ -235,11 +241,11 @@ public class Itch {
         }
 
         // register shutdown hook
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> close()));
+        Runtime.getRuntime().addShutdownHook(new Thread(this::close));
 
         // start accepting connections
-        this.socketAcceptor = new SocketAcceptorThread(heartbeatPeriodMs);
-        socketAcceptor.start();
+        this.socketAcceptor = new SocketAcceptorThread();
+        executor.scheduleAtFixedRate(socketAcceptor, 0, 1, TimeUnit.SECONDS);
 
         // start the late heartbeat monitor thread
         executor.scheduleAtFixedRate(new Runnable(){
@@ -247,13 +253,29 @@ public class Itch {
             public void run() {
                 DateFormat fmt = new SimpleDateFormat(TIMESTAMP_FORMAT);
                 long now = System.currentTimeMillis();
-                for(HeartBeatReader reader: heartbeatReaders){
+
+                // the list of heartbeatReaders could be modified at any time, so we are using this
+                // iteration technique to avoid a concurrent modification exception
+                int hbCount = heartbeatReaders.size();
+                for(int i=0;i < hbCount; ++i){
+                    HeartBeatReader reader = heartbeatReaders.get(i);
                     if (  now - reader.getLastHeartbeat() > 10000){
                         Itch.log.warning("there have been no heart beats from " + reader.getRemoteAddress() + " since " + fmt.format(reader.getLastHeartbeat()));
                     }
                 }
             }
         }, 30, 10, TimeUnit.SECONDS);
+
+        // start reading from sockets - this one runs very frequently because we want to receive the message
+        // as close to when it is ready as possible (without sucking up all the CPU in a busy loop)
+        executor.scheduleAtFixedRate( ()->{
+            // the list of heartbeatReaders could be modified at any time, so we are using this
+            // iteration technique to avoid a concurrent modification exception
+            int hbCount = heartbeatReaders.size();
+            for(int i=0;i< hbCount; ++i){
+                heartbeatReaders.get(i).run();
+            }
+        },0, 5, TimeUnit.MILLISECONDS);
     }
 
     private SocketChannel waitForConnection(InetSocketAddress address) throws IOException {
@@ -293,7 +315,7 @@ public class Itch {
         try {
             socketAcceptor.join(1000);
         } catch(InterruptedException ix){
-            Itch.log.warning("The shutdown hook was interruped while waiting for the SocketAcceptorThread to stop");
+            Itch.log.warning("The shutdown hook was interrupted while waiting for the SocketAcceptorThread to stop");
         }
 
         // shut down executor threads 
@@ -350,34 +372,26 @@ public class Itch {
     }
 
     private class SocketAcceptorThread extends Thread {
-        public SocketAcceptorThread(int heartbeatPeriodMs){
+        public SocketAcceptorThread(){
             super();
-            this.heartbeatPeriodMs = heartbeatPeriodMs;
             this.setDaemon(false);
         }
 
-        private int heartbeatPeriodMs;
-
         @Override
         public void run() {
-            while(! isInterrupted()){
-                try {
-                    SocketChannel socket = serverSocketChannel.accept();
-                    socket.configureBlocking(false);
+            try {
+                SocketChannel socket = serverSocketChannel.accept();
+                socket.configureBlocking(false);
 
-                    Itch.log.info("Received a new connection from " + socket.getRemoteAddress());
+                Itch.log.info("Received a new connection from " + socket.getRemoteAddress());
 
-                    HeartBeatReader hbReader = new HeartBeatReader(socket, heartBeatFactory, heartbeatCount, heartbeatLatencyMs);
-                    heartbeatReaders.add(hbReader);
-                    executor.scheduleAtFixedRate(hbReader, 1, heartbeatPeriodMs, TimeUnit.MILLISECONDS);
-                } catch(ClosedByInterruptException cbix){
-                    // this is expected during shutdown
-                    break;
-                } catch(IOException x){
-                    Itch.log.log(Level.WARNING, "An error occurred while accepting a connection.", x);
-                }
+                HeartBeatReader hbReader = new HeartBeatReader(socket, heartBeatFactory, heartbeatCount, heartbeatLatencyMs);
+                heartbeatReaders.add(hbReader);
+            } catch(ClosedByInterruptException cbix){
+                // this is expected during shutdown
+            } catch(IOException x){
+                Itch.log.log(Level.WARNING, "An error occurred while accepting a connection.", x);
             }
-            Itch.log.info("SocketAcceptorThread has finished");
         }
     }
 }
