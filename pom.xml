@@ -6,7 +6,7 @@
 
     <groupId>com.sorintlab</groupId>
     <artifactId>itch</artifactId>
-    <version>1.0.2-SNAPSHOT</version>
+    <version>1.0.2</version>
 
     <name>itch</name>
 
