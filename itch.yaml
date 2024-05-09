@@ -8,7 +8,7 @@ payloadBytes: 0
 heartbeatPeriodMs: 1000
 logging:
   fileEnabled: False
-  consoleEnabled: False
+  consoleEnabled: True
 prometheus:
   enabled: True
   port: 9090

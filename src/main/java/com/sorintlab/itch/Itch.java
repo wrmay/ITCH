@@ -276,6 +276,9 @@ public class Itch {
                 heartbeatReaders.get(i).run();
             }
         },0, 5, TimeUnit.MILLISECONDS);
+
+        MachineStatsCollector machineStatsCollector = new MachineStatsCollector(addresses[localAddressNum].toString());
+        executor.scheduleAtFixedRate(machineStatsCollector, 0, 10, TimeUnit.SECONDS);
     }
 
     private SocketChannel waitForConnection(InetSocketAddress address) throws IOException {
