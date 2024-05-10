@@ -10,7 +10,7 @@ services:
       default-net:
         ipv4_address: 192.168.1.101
     working_dir: /opt/project
-    command: java -cp /opt/project/target/itch-1.0.3.jar com.sorintlab.itch.Itch
+    command: java -cp /opt/project/target/itch-1.0.4-SNAPSHOT.jar com.sorintlab.itch.Itch
 
   node2:
     hostname: node2
@@ -23,7 +23,7 @@ services:
       default-net:
         ipv4_address: 192.168.1.102
     working_dir: /opt/project
-    command: java -cp /opt/project/target/itch-1.0.3.jar com.sorintlab.itch.Itch
+    command: java -cp /opt/project/target/itch-1.0.4-SNAPSHOT.jar com.sorintlab.itch.Itch
 
   node3:
     hostname: node3
@@ -36,7 +36,7 @@ services:
       default-net:
         ipv4_address: 192.168.1.103
     working_dir: /opt/project
-    command: java -cp /opt/project/target/itch-1.0.3.jar com.sorintlab.itch.Itch
+    command: java -cp /opt/project/target/itch-1.0.4-SNAPSHOT.jar com.sorintlab.itch.Itch
 
 networks:
   default-net:
