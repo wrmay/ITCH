@@ -45,7 +45,7 @@ public class HeartBeatReader implements Runnable {
 
     private String formatLabel(String in){
         int i = in.lastIndexOf(":");
-        return in.substring(0,i).replace(".", "_").replace("/", "");
+        return in.substring(0,i).replace("/", "");
     }
 
     @Override

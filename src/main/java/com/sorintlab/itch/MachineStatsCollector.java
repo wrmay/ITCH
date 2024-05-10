@@ -36,7 +36,7 @@ public class MachineStatsCollector implements Runnable{
             if(words.length > 0){
                 double loadavg = Double.parseDouble(words[0]);
                 Itch.log.info("1 minute load average: " + loadavg);
-                loadAvg1m.labelValues(hostname).set(loadavg);
+                loadAvg1m.labelValues(formatLabel(hostname)).set(loadavg);
             } else {
                 Itch.log.warning("An error occurred while parsing the output from \"cat /proc/loadavg\": " + output);
             }
@@ -46,4 +46,10 @@ public class MachineStatsCollector implements Runnable{
             Itch.log.warning("MachineStatsCollector was interrupted");
         }
     }
+
+    private String formatLabel(String in){
+        int i = in.lastIndexOf(":");
+        return in.substring(0,i).replace("/", "");
+    }
+
 }
